@@ -174,7 +174,7 @@ asyncio.run(process_image_async())
 ## Performance
 Example processing times for a 1024x1024 image:
 - Pure Python: ~115 seconds
-- With Rust Acceleration: ~5 seconds
+- With Rust Acceleration: ~400 milliseconds
 
 ## Algorithm Details
 
