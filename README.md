@@ -172,9 +172,9 @@ asyncio.run(process_image_async())
 - **`jaggy`**: Removes isolated diagonal pixels
 
 ## Performance
-Example processing times for a 1024x1024 image:
-- Pure Python: ~115 seconds
-- With Rust Acceleration: ~400 milliseconds
+Example processing times for a 1024x1024 image on a high-end Intel desktop CPU using defaults:
+- Pure Python: ~71 seconds
+- With Rust Acceleration: ~700 milliseconds (about 100x speedup!)
 
 ## Algorithm Details
 
