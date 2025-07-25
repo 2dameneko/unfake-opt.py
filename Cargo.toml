@@ -1,0 +1,22 @@
+[package]
+name = "unfake"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+name = "unfake"
+crate-type = ["cdylib"]
+path = "rust/lib.rs"
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py38"] }
+numpy = "0.20"
+ndarray = { version = "0.15", features = ["rayon"] }
+rayon = "1.8"
+num-traits = "0.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true 

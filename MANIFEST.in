@@ -1,0 +1,13 @@
+include README.md
+include LICENSE
+include Cargo.toml
+include pyproject.toml
+recursive-include rust *.rs
+recursive-include src *.py
+prune __pycache__
+prune *.pyc
+prune .git
+global-exclude *.so
+global-exclude *.dylib
+global-exclude *.dll
+global-exclude *.pyd 
