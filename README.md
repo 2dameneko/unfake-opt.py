@@ -1,10 +1,20 @@
 # unfake
 
-Improve AI-generated pixel art through scale detection, color quantization, and smart downscaling. Features Rust acceleration for critical operations.
+Improve AI-generated pixel art through scale detection, color quantization, and smart downscaling. Features Rust acceleration for critical operations, achieving a 10-20% speedup over the original JavaScript implementation.
 
 Based on the excellent work by:
 - **Eugeniy Smirnov** ([jenissimo/unfake.js](https://github.com/jenissimo/unfake.js)) - Original JavaScript implementation
 - **Igor Bezkrovnyi** ([ibezkrovnyi/image-quantization](https://github.com/ibezkrovnyi/image-quantization)) - Image quantization algorithms
+
+## Examples
+Click each image to view the original, processed result, and results of two different naïve fixed-size-nearest-neighbor methods.
+<img width="4156" height="1054" alt="comparison_grid" src="https://github.com/user-attachments/assets/f48d09a6-991e-4c51-b881-f75ddfc45e86" />
+<img width="4140" height="1054" alt="comparison_grid" src="https://github.com/user-attachments/assets/4b17c7c3-cb0e-48d5-b47b-9daaa44e7999" />
+<img width="4128" height="1038" alt="comparison_grid" src="https://github.com/user-attachments/assets/2bdee15e-ee00-462b-bc1a-456e8f156377" />
+<img width="7212" height="2328" alt="comparison_grid" src="https://github.com/user-attachments/assets/9f37e1f7-68aa-4173-90d7-1fbfbcad5895" />
+<img width="7196" height="2334" alt="comparison_grid" src="https://github.com/user-attachments/assets/65afdd0d-6f80-4997-bb6f-5b63e2fa83bc" />
+
+Images taken from examples for AI pixel art models like [Pixel Art XL](https://huggingface.co/nerijs/pixel-art-xl), [FLUX.1-Dev Pixel LoRA](https://huggingface.co/UmeAiRT/FLUX.1-dev-LoRA-Modern_Pixel_art), and [FLUX.1-Kontext Pixel LoRA](https://huggingface.co/Shakker-Labs/FLUX.1-Kontext-dev-LoRA-Pixel-Style?image-viewer=EE86A1D8F1D252D65E9E06A3AAA2F5EF79A47E8A).
 
 ## Features
 
@@ -14,6 +24,11 @@ Based on the excellent work by:
 - **Image Cleanup**: Alpha binarization, morphological operations, and jaggy edge removal
 - **Grid Snapping**: Automatic alignment to pixel grid for clean results
 - **Flexible API**: Both synchronous and asynchronous interfaces
+- **Fast**: Process a 1-megapixel image in as fast as half a second.
+
+### Upcoming
+
+- Vectorization
 
 ## Installation
 
@@ -157,9 +172,9 @@ asyncio.run(process_image_async())
 - **`jaggy`**: Removes isolated diagonal pixels
 
 ## Performance
-Example processing times for a 1024x1024 image:
-- Pure Python: ~115 seconds
-- With Rust Acceleration: ~5 seconds
+Example processing times for a 1024x1024 image on a high-end Intel desktop CPU using defaults:
+- Pure Python: ~71 seconds
+- With Rust Acceleration: ~700 milliseconds (about 100x speedup!)
 
 ## Algorithm Details
 
