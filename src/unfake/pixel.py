@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Based on unfake.js by Eugeniy Smirnov (github @jenissimo) 
+Based on unfake.js by Eugeniy Smirnov (github @jenissimo)
 """
 
 import json
@@ -26,6 +26,7 @@ try:
         WuQuantizerAccelerated,
         count_colors_accelerated,
         downscale_dominant_color_accelerated,
+        downscale_mode_accelerated,
         finalize_pixels_accelerated,
         map_pixels_to_palette_accelerated,
         runs_based_detect_accelerated,
@@ -412,6 +413,10 @@ def downscale_by_dominant_color(
 
 def downscale_block(image: np.ndarray, scale: int, method: str = "median") -> np.ndarray:
     """Downscale using various aggregation methods"""
+    # Use accelerated mode if available and method is "mode"
+    if method == "mode" and "RUST_AVAILABLE" in globals() and RUST_AVAILABLE:
+        return downscale_mode_accelerated(image, scale)
+
     h, w = image.shape[:2]
     target_h = h // scale
     target_w = w // scale

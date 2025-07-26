@@ -7,7 +7,9 @@ mod quantizer;
 mod utils;
 
 use quantizer::WuQuantizerRust;
+use utils::content_adaptive_downscale_rust;
 use utils::downscale_dominant;
+use utils::downscale_mode;
 
 /// Calculate GCD of two numbers
 fn gcd(mut a: u32, mut b: u32) -> u32 {
@@ -227,6 +229,30 @@ fn downscale_dominant_color(
     Ok(py_array.into())
 }
 
+/// Downscale image using mode (most frequent color) method
+#[pyfunction]
+fn downscale_mode_method(
+    _py: Python<'_>,
+    image: PyReadonlyArray3<u8>,
+    scale: usize,
+) -> PyResult<Py<PyArray3<u8>>> {
+    let img_array = image.as_array();
+    let result = downscale_mode(&img_array, scale);
+
+    // Convert ndarray::Array3 to PyArray3
+    let (h, w, c) = result.dim();
+    let py_array = unsafe { PyArray3::<u8>::new(_py, [h, w, c], false) };
+
+    // Copy data
+    for ((y, x, ch), &value) in result.indexed_iter() {
+        unsafe {
+            *py_array.uget_mut([y, x, ch]) = value;
+        }
+    }
+
+    Ok(py_array.into())
+}
+
 /// Count unique opaque colors in an image
 #[pyfunction]
 fn count_unique_colors(_py: Python<'_>, image: PyReadonlyArray3<u8>) -> PyResult<usize> {
@@ -307,14 +333,44 @@ fn finalize_pixels_rust(
     Ok(result.into())
 }
 
+/// Content-adaptive downscaling using EM-C algorithm
+#[pyfunction]
+fn content_adaptive_downscale(
+    py: Python<'_>,
+    lab_image: PyReadonlyArray3<f32>,
+    target_w: usize,
+    target_h: usize,
+    num_iterations: Option<usize>,
+) -> PyResult<Py<PyArray3<f32>>> {
+    let img_array = lab_image.as_array();
+    let iterations = num_iterations.unwrap_or(5);
+
+    let result = content_adaptive_downscale_rust(&img_array, target_w, target_h, iterations);
+
+    // Convert ndarray::Array3 to PyArray3
+    let (h, w, c) = result.dim();
+    let py_array = unsafe { PyArray3::<f32>::new(py, [h, w, c], false) };
+
+    // Copy data
+    for ((y, x, ch), &value) in result.indexed_iter() {
+        unsafe {
+            *py_array.uget_mut([y, x, ch]) = value;
+        }
+    }
+
+    Ok(py_array.into())
+}
+
 /// Python module
 #[pymodule]
 fn unfake(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(runs_based_detect, m)?)?;
     m.add_function(wrap_pyfunction!(map_pixels_to_palette, m)?)?;
     m.add_function(wrap_pyfunction!(downscale_dominant_color, m)?)?;
+    m.add_function(wrap_pyfunction!(downscale_mode_method, m)?)?;
     m.add_function(wrap_pyfunction!(count_unique_colors, m)?)?;
     m.add_function(wrap_pyfunction!(finalize_pixels_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(content_adaptive_downscale, m)?)?;
     m.add_class::<WuQuantizerRust>()?;
     Ok(())
 }

@@ -8,8 +8,10 @@ logger = logging.getLogger(__name__)
 # Try to import Rust acceleration
 try:
     from unfake.unfake import WuQuantizerRust
+    from unfake.unfake import content_adaptive_downscale as content_adaptive_downscale_rust
     from unfake.unfake import count_unique_colors as count_colors_rust
     from unfake.unfake import downscale_dominant_color as downscale_dominant_rust
+    from unfake.unfake import downscale_mode_method as downscale_mode_rust
     from unfake.unfake import finalize_pixels_rust
     from unfake.unfake import map_pixels_to_palette as map_pixels_to_palette_rust
     from unfake.unfake import runs_based_detect as runs_based_detect_rust
@@ -108,6 +110,26 @@ def downscale_dominant_color_accelerated(
         return downscale_by_dominant_color(image, scale, threshold)
 
 
+def downscale_mode_accelerated(image: np.ndarray, scale: int) -> np.ndarray:
+    """
+    Downscale using mode (most frequent color) method with Rust acceleration if available.
+
+    Args:
+        image: Input image as numpy array (H, W, C)
+        scale: Scale factor for downscaling
+
+    Returns:
+        Downscaled image
+    """
+    if RUST_AVAILABLE:
+        return downscale_mode_rust(image, scale)
+    else:
+        # Fall back to Python implementation
+        from pixel import downscale_block
+
+        return downscale_block(image, scale, "mode")
+
+
 def count_colors_accelerated(image: np.ndarray) -> int:
     """
     Count unique opaque colors with Rust acceleration if available.
@@ -144,6 +166,30 @@ def finalize_pixels_accelerated(image: np.ndarray) -> np.ndarray:
         from pixel import finalize_pixels
 
         return finalize_pixels(image)
+
+
+def content_adaptive_downscale_accelerated(
+    lab_image: np.ndarray, target_w: int, target_h: int, num_iterations: int = 5
+) -> np.ndarray:
+    """
+    Content-adaptive downscaling with Rust acceleration if available.
+
+    Args:
+        lab_image: Input image in LAB color space as numpy array (H, W, 3) with float32 dtype
+        target_w: Target width
+        target_h: Target height
+        num_iterations: Number of EM-C iterations (default: 5)
+
+    Returns:
+        Downscaled image in LAB color space
+    """
+    if RUST_AVAILABLE:
+        return content_adaptive_downscale_rust(lab_image, target_w, target_h, num_iterations)
+    else:
+        # Fall back to Python implementation
+        from content_adaptive import content_adaptive_core
+
+        return content_adaptive_core(lab_image, target_w, target_h)
 
 
 class WuQuantizerAccelerated:
@@ -190,6 +236,7 @@ __all__ = [
     "downscale_dominant_color_accelerated",
     "count_colors_accelerated",
     "finalize_pixels_accelerated",
+    "content_adaptive_downscale_accelerated",
     "WuQuantizerAccelerated",
     "RUST_AVAILABLE",
 ]

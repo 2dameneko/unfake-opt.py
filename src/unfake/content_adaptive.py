@@ -208,7 +208,7 @@ def content_adaptive_downscale(image: np.ndarray, target_w: int, target_h: int) 
     Returns:
         Downscaled image
     """
-    logger.warning("Using experimental content-adaptive downscaling - this may take a while")
+    logger.info("Using content-adaptive downscaling with Rust acceleration")
 
     h, w = image.shape[:2]
     has_alpha = image.shape[2] == 4
@@ -224,8 +224,10 @@ def content_adaptive_downscale(image: np.ndarray, target_w: int, target_h: int) 
     rgb_float = rgb.astype(np.float32) / 255.0
     lab = cv2.cvtColor(rgb_float, cv2.COLOR_RGB2Lab)
 
-    # Apply content-adaptive algorithm
-    out_lab = content_adaptive_core(lab, target_w, target_h)
+    # Apply content-adaptive algorithm using Rust acceleration
+    from .pixel_rust_integration import content_adaptive_downscale_accelerated
+
+    out_lab = content_adaptive_downscale_accelerated(lab, target_w, target_h)
 
     # Convert back to RGB
     out_rgb_float = cv2.cvtColor(out_lab, cv2.COLOR_Lab2RGB)

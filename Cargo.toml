@@ -1,7 +1,7 @@
 [package]
 name = "unfake"
-version = "1.0.0"
-edition = "2021"
+version = "1.0.1"
+edition = "2025"
 
 [lib]
 name = "unfake"
@@ -19,4 +19,4 @@ num-traits = "0.2"
 lto = true
 codegen-units = 1
 opt-level = 3
-strip = true 
+strip = true
