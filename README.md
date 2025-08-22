@@ -42,7 +42,7 @@ pip install unfake
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/unfake.git
+git clone https://github.com/painebenjamin/unfake.py.git
 cd unfake
 
 # Install with pip (includes Rust compilation)
