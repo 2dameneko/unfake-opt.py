@@ -687,7 +687,7 @@ async def process_image(
         if file_path_or_image.mode != "RGBA":
             file_path_or_image = file_path_or_image.convert("RGBA")
         current = np.array(file_path_or_image)
-    elif isinstance(file_path_or_image, NDArray):
+    elif isinstance(file_path_or_image, np.ndarray):
         if file_path_or_image.ndim == 4:
             assert file_path_or_image.shape[0] == 1, "Batch dimension is not supported"
             file_path_or_image = file_path_or_image[0]
