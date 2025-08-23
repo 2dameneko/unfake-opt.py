@@ -4,16 +4,17 @@ Based on the paper "Content-Adaptive Image Downscaling" by Kopf et al.
 """
 
 import logging
+from typing import Dict, List
 
 import cv2
 import numpy as np
 
-logger = logging.getLogger("content_adaptive")
+logger = logging.getLogger("unfake.py")
 
 
 def multiply_2x2(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Multiply two 2x2 matrices"""
-    return np.array(
+    return np.array(  # type: ignore[no-any-return]
         [
             [a[0, 0] * b[0, 0] + a[0, 1] * b[1, 0], a[0, 0] * b[0, 1] + a[0, 1] * b[1, 1]],
             [a[1, 0] * b[0, 0] + a[1, 1] * b[1, 0], a[1, 0] * b[0, 1] + a[1, 1] * b[1, 1]],
@@ -69,7 +70,7 @@ def content_adaptive_core(src_lab: np.ndarray, target_w: int, target_h: int) -> 
 
         # E-Step: Compute weights
         gamma_sum_per_pixel = np.zeros((h_in, w_in)) + 1e-9
-        w_ki = [{} for _ in range(w_out * h_out)]
+        w_ki: List[Dict[int, float]] = [{} for _ in range(w_out * h_out)]
 
         for k in range(w_out * h_out):
             s0, s1, s2, s3 = sigma_k[k]
@@ -114,8 +115,8 @@ def content_adaptive_core(src_lab: np.ndarray, target_w: int, target_h: int) -> 
 
         for k in range(w_out * h_out):
             w_sum = 1e-9
-            new_mu = [0, 0]
-            new_nu = [0, 0, 0]
+            new_mu: List[float] = [0.0, 0.0]
+            new_nu: List[float] = [0.0, 0.0, 0.0]
 
             for i, wk in w_ki[k].items():
                 yi = i // w_in
@@ -139,7 +140,7 @@ def content_adaptive_core(src_lab: np.ndarray, target_w: int, target_h: int) -> 
             new_nu_k.append(new_nu)
 
             # Update covariance
-            new_sigma = [0, 0, 0, 0]
+            new_sigma: List[float] = [0.0, 0.0, 0.0, 0.0]
             for i, wk in w_ki[k].items():
                 yi = i // w_in
                 xi = i % w_in
@@ -193,7 +194,7 @@ def content_adaptive_core(src_lab: np.ndarray, target_w: int, target_h: int) -> 
             k_idx = yk * w_out + xk
             out_lab[yk, xk] = nu_k[k_idx]
 
-    return out_lab
+    return out_lab  # type: ignore[no-any-return]
 
 
 def content_adaptive_downscale(image: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
@@ -242,4 +243,4 @@ def content_adaptive_downscale(image: np.ndarray, target_w: int, target_h: int) 
     else:
         out_image = out_rgb
 
-    return out_image
+    return out_image  # type: ignore[no-any-return]

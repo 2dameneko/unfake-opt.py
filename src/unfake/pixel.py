@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -39,7 +39,7 @@ except ImportError:
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("pixel.py")
+logger = logging.getLogger("unfake.py")
 
 
 @dataclass
@@ -75,7 +75,7 @@ def detect_scale_from_signal(signal: np.ndarray) -> int:
     threshold = mean_val + 1.5 * std_val
 
     # Find peaks
-    peaks = []
+    peaks: List[int] = []
     for i in range(1, len(signal) - 1):
         if signal[i] > threshold and signal[i] > signal[i - 1] and signal[i] > signal[i + 1]:
             if not peaks or i - peaks[-1] > 2:
@@ -238,7 +238,7 @@ def get_gradient_profile(gray: np.ndarray, direction: str) -> np.ndarray:
     else:
         sobel = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
         profile = np.sum(np.abs(sobel), axis=1)
-    return profile
+    return profile  # type: ignore[no-any-return]
 
 
 def find_optimal_crop(gray: np.ndarray, scale: int) -> Tuple[int, int]:
@@ -249,11 +249,11 @@ def find_optimal_crop(gray: np.ndarray, scale: int) -> Tuple[int, int]:
     profile_x = np.sum(np.abs(sobel_x), axis=0)
     profile_y = np.sum(np.abs(sobel_y), axis=1)
 
-    def find_best_offset(profile, s):
+    def find_best_offset(profile: np.ndarray, s: int) -> int:
         best_offset = 0
-        max_score = -1
+        max_score: float = -1.0
         for offset in range(s):
-            score = np.sum(profile[offset::s])
+            score: float = np.sum(profile[offset::s])
             if score > max_score:
                 max_score = score
                 best_offset = offset
@@ -273,7 +273,7 @@ def alpha_binarization(image: np.ndarray, threshold: int = 128) -> np.ndarray:
 
     result = image.copy()
     result[:, :, 3] = np.where(result[:, :, 3] >= threshold, 255, 0)
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 def morphological_cleanup(image: np.ndarray) -> np.ndarray:
@@ -290,14 +290,14 @@ def morphological_cleanup(image: np.ndarray) -> np.ndarray:
 
         result = image.copy()
         result[:, :, 3] = alpha
-        return result
+        return result  # type: ignore[no-any-return]
     else:
         # Process each channel
         result = image.copy()
         for i in range(3):
             result[:, :, i] = cv2.morphologyEx(result[:, :, i], cv2.MORPH_OPEN, kernel)
             result[:, :, i] = cv2.morphologyEx(result[:, :, i], cv2.MORPH_CLOSE, kernel)
-        return result
+        return result  # type: ignore[no-any-return]
 
 
 def jaggy_cleaner(image: np.ndarray) -> np.ndarray:
@@ -305,7 +305,7 @@ def jaggy_cleaner(image: np.ndarray) -> np.ndarray:
     h, w = image.shape[:2]
     result = image.copy()
 
-    def is_opaque(y, x):
+    def is_opaque(y: int, x: int) -> bool:
         if 0 <= y < h and 0 <= x < w:
             return result[y, x, 3] > 128 if image.shape[2] == 4 else True
         return False
@@ -326,8 +326,8 @@ def jaggy_cleaner(image: np.ndarray) -> np.ndarray:
             se = is_opaque(y + 1, x + 1)
             sw = is_opaque(y + 1, x - 1)
 
-            orth_count = sum([n, s, e, w])
-            diag_count = sum([ne, nw, se, sw])
+            orth_count: int = sum([n, s, e, w])
+            diag_count: int = sum([ne, nw, se, sw])
 
             # Remove if no orthogonal neighbors and only one diagonal
             if orth_count == 0 and diag_count == 1:
@@ -336,7 +336,7 @@ def jaggy_cleaner(image: np.ndarray) -> np.ndarray:
                 else:
                     result[y, x] = [0, 0, 0]
 
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 def finalize_pixels(image: np.ndarray) -> np.ndarray:
@@ -353,7 +353,7 @@ def finalize_pixels(image: np.ndarray) -> np.ndarray:
     mask = result[:, :, 3] < 128
     result[mask] = [0, 0, 0, 0]
     result[~mask, 3] = 255
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 def downscale_by_dominant_color(
@@ -409,7 +409,7 @@ def downscale_by_dominant_color(
                 else:
                     result[ty, tx] = np.mean(pixels, axis=0)
 
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 def downscale_block(image: np.ndarray, scale: int, method: str = "median") -> np.ndarray:
@@ -466,7 +466,7 @@ def downscale_block(image: np.ndarray, scale: int, method: str = "median") -> np
                 elif method == "nearest":
                     result[ty, tx] = pixels[0]
 
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 def quantize_colors(
@@ -501,7 +501,7 @@ def quantize_colors(
                         best_color = palette_rgb[0]
 
                         for color in palette_rgb:
-                            dist = np.sum((pixel - color) ** 2)
+                            dist: float = np.sum((pixel - color) ** 2)
                             if dist < min_dist:
                                 min_dist = dist
                                 best_color = color
@@ -516,7 +516,7 @@ def quantize_colors(
         if "RUST_AVAILABLE" in globals() and RUST_AVAILABLE:
             quantizer = WuQuantizerAccelerated(max_colors)
         else:
-            quantizer = WuQuantizer(max_colors)
+            quantizer = WuQuantizer(max_colors)  # type: ignore[assignment]
         return quantizer.quantize(image)
 
 
@@ -597,7 +597,7 @@ def detect_optimal_color_count(
     small_img = cv2.GaussianBlur(small_img, (5, 5), 1)
 
     # Gather color statistics with aggressive quantization
-    color_counts = {}
+    color_counts: Dict[str, int] = {}
     total_pixels = 0
 
     for y in range(small_img.shape[0]):
@@ -631,7 +631,7 @@ def detect_optimal_color_count(
 
     result = max(2, min(len(significant_colors), max_colors))
     logger.info(f"Final auto-detected color count: {result}")
-    return result
+    return result  # type: ignore[no-any-return]
 
 
 async def process_image(
@@ -641,7 +641,7 @@ async def process_image(
     detect_method: str = "auto",  # 'auto', 'runs', 'edge'
     downscale_method: str = "dominant",  # 'dominant', 'median', 'mode', 'mean', 'nearest', 'content-adaptive'
     dom_mean_threshold: float = 0.05,
-    cleanup: Dict[str, bool] = None,
+    cleanup: Optional[Dict[str, bool]] = None,
     fixed_palette: Optional[List[str]] = None,
     alpha_threshold: int = 128,
     snap_grid: bool = True,
@@ -681,7 +681,7 @@ async def process_image(
         # Load image
         pil_image = Image.open(file_path_or_image)
         if pil_image.mode != "RGBA":
-            pil_image = pil_image.convert("RGBA")
+            pil_image = pil_image.convert("RGBA")  # type: ignore[assignment]
         current = np.array(pil_image)
     elif isinstance(file_path_or_image, Image.Image):
         if file_path_or_image.mode != "RGBA":
@@ -691,11 +691,18 @@ async def process_image(
         if file_path_or_image.ndim == 4:
             assert file_path_or_image.shape[0] == 1, "Batch dimension is not supported"
             file_path_or_image = file_path_or_image[0]
+
+        if file_path_or_image.dtype != np.uint8:
+            file_path_or_image = (file_path_or_image * 255).astype(np.uint8)
+
         h, w, c = file_path_or_image.shape
         if c == 4:
             current = file_path_or_image
         elif c == 3:
-            current = np.concatenate([file_path_or_image, np.ones((h, w, 1)) * 255], axis=2)
+            current = np.concatenate([
+                file_path_or_image,
+                (np.ones((h, w, 1)) * 255).astype(np.uint8),
+            ], axis=2)
         else:
             raise ValueError(f"Unsupported number of channels: {c}")
 
@@ -844,7 +851,7 @@ async def process_image(
 
 
 # Synchronous wrapper for the async function
-def process_image_sync(file_path: str, **kwargs) -> Dict:
+def process_image_sync(file_path: str, **kwargs: Any) -> Dict:
     """Synchronous version of process_image"""
     import asyncio
 

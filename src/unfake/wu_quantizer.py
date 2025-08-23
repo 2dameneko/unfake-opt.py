@@ -8,7 +8,7 @@ from typing import List, Tuple
 
 import numpy as np
 
-logger = logging.getLogger("wu_quantizer")
+logger = logging.getLogger("unfake.py")
 
 
 @dataclass
@@ -31,7 +31,10 @@ class WuQuantizer:
     maximizing the variance of colors within each box.
     """
 
-    def __init__(self, max_colors: int = 256, significant_bits: int = 5):
+    pixels: List[Tuple[int, int, int]]
+    boxes: List[Box]
+
+    def __init__(self, max_colors: int = 256, significant_bits: int = 5) -> None:
         """
         Initialize Wu quantizer
 
@@ -39,22 +42,22 @@ class WuQuantizer:
             max_colors: Maximum number of colors in the palette
             significant_bits: Number of significant bits per channel (5 = 32 levels per channel)
         """
+        # Lookup table for squared values
+        self.sqr_table = np.array([i * i for i in range(256)], dtype=np.int32)
+        self._reset(max_colors, significant_bits)
+
+    def _reset(self, max_colors: int, significant_bits: int) -> None:
+        """Reset the quantizer"""
         self.max_colors = max_colors
         self.significant_bits = significant_bits
         self.side_size = 1 << significant_bits  # 2^bits
         self.max_side_index = self.side_size - 1
 
-        # 3D histograms for moments
-        dim = self.side_size
-        self.weights = np.zeros((dim, dim, dim), dtype=np.int64)
-        self.moments_r = np.zeros((dim, dim, dim), dtype=np.int64)
-        self.moments_g = np.zeros((dim, dim, dim), dtype=np.int64)
-        self.moments_b = np.zeros((dim, dim, dim), dtype=np.int64)
-        self.moments = np.zeros((dim, dim, dim), dtype=np.float64)
-
-        # Lookup table for squared values
-        self.sqr_table = np.array([i * i for i in range(256)], dtype=np.int32)
-
+        self.weights = np.zeros((self.side_size, self.side_size, self.side_size), dtype=np.int64)
+        self.moments_r = np.zeros((self.side_size, self.side_size, self.side_size), dtype=np.int64)
+        self.moments_g = np.zeros((self.side_size, self.side_size, self.side_size), dtype=np.int64)
+        self.moments_b = np.zeros((self.side_size, self.side_size, self.side_size), dtype=np.int64)
+        self.moments = np.zeros((self.side_size, self.side_size, self.side_size), dtype=np.float64)
         self.pixels = []
         self.boxes = []
 
@@ -62,7 +65,7 @@ class WuQuantizer:
         """Convert 8-bit value to histogram index"""
         return value >> (8 - self.significant_bits)
 
-    def add_pixels(self, pixels: np.ndarray):
+    def add_pixels(self, pixels: np.ndarray) -> None:
         """
         Add pixels to the histogram
 
@@ -86,7 +89,7 @@ class WuQuantizer:
 
             self.pixels.append((r, g, b))
 
-    def _compute_cumulative_moments(self):
+    def _compute_cumulative_moments(self) -> None:
         """Convert histogram to cumulative moments"""
         dim = self.side_size
 
@@ -133,7 +136,7 @@ class WuQuantizer:
 
     def _volume(self, box: Box, moment: np.ndarray) -> float:
         """Compute sum over a box of any given moment"""
-        return (
+        return (  # type: ignore[no-any-return]
             moment[box.r_max, box.g_max, box.b_max]
             - moment[box.r_max, box.g_max, box.b_min]
             - moment[box.r_max, box.g_min, box.b_max]
@@ -298,7 +301,7 @@ class WuQuantizer:
             Quantized image and color palette
         """
         # Reset state
-        self.__init__(self.max_colors, self.significant_bits)
+        self._reset(self.max_colors, self.significant_bits)
 
         # Build histogram
         h, w = pixels.shape[:2]
@@ -370,7 +373,7 @@ class WuQuantizer:
                     best_idx = 0
 
                     for idx, color in enumerate(palette):
-                        dist = np.sum((pixel - np.array(color)) ** 2)
+                        dist: float = np.sum((pixel - np.array(color)) ** 2)
                         if dist < min_dist:
                             min_dist = dist
                             best_idx = idx

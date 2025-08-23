@@ -3,11 +3,11 @@ from typing import List, Tuple
 
 import numpy as np
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("unfake.py")
 
 # Try to import Rust acceleration
 try:
-    from unfake.unfake import WuQuantizerRust
+    from unfake.unfake import WuQuantizerRust  # type: ignore[import-untyped,unused-ignore,import-not-found]
     from unfake.unfake import content_adaptive_downscale as content_adaptive_downscale_rust
     from unfake.unfake import count_unique_colors as count_colors_rust
     from unfake.unfake import downscale_dominant_color as downscale_dominant_rust
@@ -34,12 +34,12 @@ def runs_based_detect_accelerated(image: np.ndarray) -> int:
         Detected scale factor
     """
     if RUST_AVAILABLE:
-        return runs_based_detect_rust(image)
+        return runs_based_detect_rust(image)  # type: ignore[no-any-return]
     else:
         # Fall back to Python implementation
-        from pixel import runs_based_detect
+        from unfake.pixel import runs_based_detect
 
-        return runs_based_detect(image)
+        return runs_based_detect(image)  # type: ignore[no-any-return]
 
 
 def map_pixels_to_palette_accelerated(
@@ -56,7 +56,7 @@ def map_pixels_to_palette_accelerated(
         Quantized image
     """
     if RUST_AVAILABLE:
-        return map_pixels_to_palette_rust(pixels, palette)
+        return map_pixels_to_palette_rust(pixels, palette)  # type: ignore[no-any-return]
     else:
         # Fall back to Python implementation
         h, w, c = pixels.shape
@@ -73,7 +73,7 @@ def map_pixels_to_palette_accelerated(
                     best_color = palette[0]
 
                     for color in palette:
-                        dist = np.sum((pixel.astype(int) - np.array(color).astype(int)) ** 2)
+                        dist: float = np.sum((pixel.astype(int) - np.array(color).astype(int)) ** 2)
                         if dist < min_dist:
                             min_dist = dist
                             best_color = color
@@ -84,7 +84,7 @@ def map_pixels_to_palette_accelerated(
                     if has_alpha:
                         quantized[y, x, 3] = 255
 
-        return quantized.astype(np.uint8)
+        return quantized.astype(np.uint8)  # type: ignore[no-any-return]
 
 
 def downscale_dominant_color_accelerated(
@@ -102,12 +102,12 @@ def downscale_dominant_color_accelerated(
         Downscaled image
     """
     if RUST_AVAILABLE:
-        return downscale_dominant_rust(image, scale, threshold)
+        return downscale_dominant_rust(image, scale, threshold)  # type: ignore[no-any-return]
     else:
         # Fall back to Python implementation
-        from pixel import downscale_by_dominant_color
+        from unfake.pixel import downscale_by_dominant_color
 
-        return downscale_by_dominant_color(image, scale, threshold)
+        return downscale_by_dominant_color(image, scale, threshold)  # type: ignore[no-any-return]
 
 
 def downscale_mode_accelerated(image: np.ndarray, scale: int) -> np.ndarray:
@@ -122,12 +122,12 @@ def downscale_mode_accelerated(image: np.ndarray, scale: int) -> np.ndarray:
         Downscaled image
     """
     if RUST_AVAILABLE:
-        return downscale_mode_rust(image, scale)
+        return downscale_mode_rust(image, scale)  # type: ignore[no-any-return]
     else:
         # Fall back to Python implementation
-        from pixel import downscale_block
+        from unfake.pixel import downscale_block
 
-        return downscale_block(image, scale, "mode")
+        return downscale_block(image, scale, "mode")  # type: ignore[no-any-return]
 
 
 def count_colors_accelerated(image: np.ndarray) -> int:
@@ -141,12 +141,12 @@ def count_colors_accelerated(image: np.ndarray) -> int:
         Number of unique colors
     """
     if RUST_AVAILABLE:
-        return count_colors_rust(image)
+        return count_colors_rust(image)  # type: ignore[no-any-return]
     else:
         # Fall back to Python implementation
-        from pixel import count_colors
+        from unfake.pixel import count_colors
 
-        return count_colors(image)
+        return count_colors(image)  # type: ignore[no-any-return]
 
 
 def finalize_pixels_accelerated(image: np.ndarray) -> np.ndarray:
@@ -160,12 +160,12 @@ def finalize_pixels_accelerated(image: np.ndarray) -> np.ndarray:
         Finalized image
     """
     if RUST_AVAILABLE:
-        return finalize_pixels_rust(image)
+        return finalize_pixels_rust(image)  # type: ignore[no-any-return]
     else:
         # Fall back to Python implementation
-        from pixel import finalize_pixels
+        from unfake.pixel import finalize_pixels
 
-        return finalize_pixels(image)
+        return finalize_pixels(image)  # type: ignore[no-any-return]
 
 
 def content_adaptive_downscale_accelerated(
@@ -184,12 +184,12 @@ def content_adaptive_downscale_accelerated(
         Downscaled image in LAB color space
     """
     if RUST_AVAILABLE:
-        return content_adaptive_downscale_rust(lab_image, target_w, target_h, num_iterations)
+        return content_adaptive_downscale_rust(lab_image, target_w, target_h, num_iterations)  # type: ignore[no-any-return]
     else:
         # Fall back to Python implementation
-        from content_adaptive import content_adaptive_core
+        from unfake.content_adaptive import content_adaptive_core
 
-        return content_adaptive_core(lab_image, target_w, target_h)
+        return content_adaptive_core(lab_image, target_w, target_h)  # type: ignore[no-any-return]
 
 
 class WuQuantizerAccelerated:
@@ -206,7 +206,7 @@ class WuQuantizerAccelerated:
             self._use_rust = True
         else:
             # Fall back to Python implementation
-            from wu_quantizer import WuQuantizer
+            from unfake.wu_quantizer import WuQuantizer
 
             self._impl = WuQuantizer(max_colors, significant_bits)
             self._use_rust = False
@@ -223,10 +223,10 @@ class WuQuantizerAccelerated:
         """
         if self._use_rust:
             # Rust version returns the same format
-            return self._impl.quantize(pixels)
+            return self._impl.quantize(pixels)  # type: ignore[no-any-return]
         else:
             # Python version compatibility
-            return self._impl.quantize(pixels)
+            return self._impl.quantize(pixels)  # type: ignore[no-any-return]
 
 
 # Export the accelerated versions
