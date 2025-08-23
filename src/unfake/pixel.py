@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 from PIL import Image
 
 from .content_adaptive import content_adaptive_downscale
@@ -634,7 +635,7 @@ def detect_optimal_color_count(
 
 
 async def process_image(
-    file_path: str,
+    file_path_or_image: Union[str, Image.Image, NDArray],
     max_colors: Optional[int] = None,  # None for auto-detection
     manual_scale: Optional[Union[int, List[int]]] = None,
     detect_method: str = "auto",  # 'auto', 'runs', 'edge'
@@ -645,12 +646,13 @@ async def process_image(
     alpha_threshold: int = 128,
     snap_grid: bool = True,
     auto_color_detect: bool = False,
+    file_path: Optional[str] = None,  # deprecated
 ) -> Dict:
     """
     Main image processing pipeline
 
     Args:
-        file_path: Path to input image
+        file_path_or_image: Path to input image, PIL image, or numpy array
         max_colors: Maximum number of colors in output (None for auto-detection)
         manual_scale: Manual scale override
         detect_method: Scale detection method ('auto', 'runs', 'edge')
@@ -661,6 +663,7 @@ async def process_image(
         alpha_threshold: Alpha binarization threshold (0-255)
         snap_grid: Whether to snap to pixel grid
         auto_color_detect: Force automatic color detection
+        file_path: Path to input image (deprecated)
 
     Returns:
         Dictionary with processed image data, palette, and manifest
@@ -670,11 +673,32 @@ async def process_image(
 
     start_time = time.time()
 
-    # Load image
-    pil_image = Image.open(file_path)
-    if pil_image.mode != "RGBA":
-        pil_image = pil_image.convert("RGBA")
-    current = np.array(pil_image)
+    if file_path is not None:
+        logger.warning("file_path is deprecated, use file_path_or_image instead")
+        file_path_or_image = file_path
+
+    if isinstance(file_path_or_image, str):
+        # Load image
+        pil_image = Image.open(file_path_or_image)
+        if pil_image.mode != "RGBA":
+            pil_image = pil_image.convert("RGBA")
+        current = np.array(pil_image)
+    elif isinstance(file_path_or_image, Image.Image):
+        if file_path_or_image.mode != "RGBA":
+            file_path_or_image = file_path_or_image.convert("RGBA")
+        current = np.array(file_path_or_image)
+    elif isinstance(file_path_or_image, NDArray):
+        if file_path_or_image.ndim == 4:
+            assert file_path_or_image.shape[0] == 1, "Batch dimension is not supported"
+            file_path_or_image = file_path_or_image[0]
+        h, w, c = file_path_or_image.shape
+        if c == 4:
+            current = file_path_or_image
+        elif c == 3:
+            current = np.concatenate([file_path_or_image, np.ones((h, w, 1)) * 255], axis=2)
+        else:
+            raise ValueError(f"Unsupported number of channels: {c}")
+
     original_size = (current.shape[1], current.shape[0])
 
     logger.info(f"Processing image: {original_size[0]}x{original_size[1]}")

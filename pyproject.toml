@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "unfake"
-version = "1.0.1"
+version = "1.0.2"
 description = "High-performance tool for improving AI-generated pixel art"
 readme = "README.md"
 authors = [
@@ -39,7 +39,7 @@ requires-python = ">=3.8"
 dependencies = [
     "opencv-python>=4.5.0",
     "Pillow>=9.0.0",
-    "numpy>=1.20.0"
+    "numpy>=1.20.0",
 ]
 
 [project.optional-dependencies]
