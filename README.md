@@ -11,13 +11,13 @@ Based on the excellent work by:
 ## Examples  
 
 Original Generated Image
-[![Original Generated Image](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_2025-09-08-005621__0.thumb.jpg)](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_2025-09-08-005621__0.png)
+![Original Generated Image](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_2025-09-08-005621__0.png)
 
 Original Dominant color method
-[![Original Dominant color method](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_dom_pixelart_2025-09-08-005621__0_8x.thumb.jpg)](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_dom_pixelart_2025-09-08-005621__0_8x.png)
+![Original Dominant color method](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_dom_pixelart_2025-09-08-005621__0_8x.png)
 
 Enhanced Dominant color method
-[![Enhanced Dominant color method](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/enh_dom_pixelart_2025-09-08-005621__0_8x.thumb.jpg)](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/enh_dom_pixelart_2025-09-08-005621__0_8x.png)
+![Enhanced Dominant color method](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/enh_dom_pixelart_2025-09-08-005621__0_8x.png)
 
 ---
 
