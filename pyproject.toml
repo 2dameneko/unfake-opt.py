@@ -3,11 +3,12 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "unfake"
-version = "1.0.4"
+name = "unfake-opt"
+version = "1.0.4.1"
 description = "High-performance tool for improving AI-generated pixel art"
 readme = "README.md"
-authors = [
+authors = [  
+    { name = "2dameneko", email = "" },
     { name = "Benjamin Paine", email = "painebenjamin@gmail.com" }
 ]
 license = { text = "MIT" }
@@ -60,9 +61,9 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/painebenjamin/unfake.py"
-Repository = "https://github.com/painebenjamin/unfake.py"
-"Bug Tracker" = "https://github.com/painebenjamin/unfake.py/issues"
+Homepage = "https://github.com/2dameneko/unfake-opt.py"
+Repository = "https://github.com/2dameneko/unfake-opt.py"
+"Bug Tracker" = "https://github.com/2dameneko/unfake-opt.py/issues"
 
 [project.scripts]
 unfake = "unfake:main"

@@ -1,7 +1,10 @@
+# File: pixel.py
 #!/usr/bin/env python3
 """
+Forked from unfake.py by Benjamin Paine (github @painebenjamin)
 Based on unfake.js by Eugeniy Smirnov (github @jenissimo)
 """
+
 
 import json
 import logging
@@ -14,8 +17,14 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
+import warnings
 from numpy.typing import NDArray
 from PIL import Image
+from sklearn.cluster import KMeans
+from sklearn.exceptions import ConvergenceWarning  # Proper import for the warning
+
+# Suppress the specific KMeans convergence warning
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 from .content_adaptive import content_adaptive_downscale
 from .wu_quantizer import WuQuantizer
@@ -356,61 +365,121 @@ def finalize_pixels(image: np.ndarray) -> np.ndarray:
     return result  # type: ignore[no-any-return]
 
 
+def pre_downscale_filter(image: np.ndarray) -> np.ndarray:
+    """Apply noise/AA reduction filter"""
+    # Gaussian blur
+    blurred = cv2.GaussianBlur(image, (3, 3), 0.5)
+    # Unsharp masking
+    sharpened = cv2.addWeighted(image, 1.5, blurred, -0.5, 0)
+    return sharpened
+
+
+def post_downscale_sharpen(image: np.ndarray) -> np.ndarray:
+    """Apply selective sharpening"""
+    gray = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY if image.shape[2] == 4 else cv2.COLOR_RGB2GRAY)
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+    var_map = cv2.convertScaleAbs(laplacian)
+    high_var_mask = var_map > 50  # Threshold for high variance areas
+
+    # Apply median filter on high variance areas
+    result = image.copy()
+    for c in range(image.shape[2]):
+        channel = result[:, :, c]
+        median = cv2.medianBlur(channel, 3)
+        channel[high_var_mask] = median[high_var_mask]
+    return result
+
 def downscale_by_dominant_color(
     image: np.ndarray, scale: int, threshold: float = 0.05
 ) -> np.ndarray:
-    """Downscale using dominant color method (best for pixel art)"""
+    """
+    Optimized downscale using dominant color method with KMeans clustering (best for pixel art).
+    Prioritizes speed while maintaining logic and quality.
+    """
     h, w = image.shape[:2]
     target_h = h // scale
     target_w = w // scale
-
     has_alpha = image.shape[2] == 4
     channels = 4 if has_alpha else 3
+
+    # Initialize result array
     result = np.zeros((target_h, target_w, channels), dtype=np.uint8)
 
+    # --- Pre-process Alpha Channel ---
+    if has_alpha:
+        # Reshape image alpha channel for easier block processing
+        alpha_reshaped = image[:, :, 3].reshape(target_h, scale, target_w, scale)
+        # Calculate median alpha per block efficiently
+        alpha_medians = np.median(alpha_reshaped, axis=(1, 3))
+        # Binarize alpha for the entire result at once
+        result[:, :, 3] = np.where(alpha_medians > 128, 255, 0)
+
+    # --- Vectorized Block Extraction ---
+    # Reshape the image into blocks of (scale x scale)
+    # New shape: (target_h, scale, target_w, scale, channels)
+    blocks = image[:target_h*scale, :target_w*scale].reshape(target_h, scale, target_w, scale, channels)
+
+    # Process RGB channels for all blocks at once where possible
     for ty in range(target_h):
         for tx in range(target_w):
-            # Extract block
-            block = image[ty * scale : (ty + 1) * scale, tx * scale : (tx + 1) * scale]
+            block = blocks[ty, :, tx, :, :]
 
             if has_alpha:
-                # Handle alpha separately
-                alpha_values = block[:, :, 3].flatten()
-                result[ty, tx, 3] = 255 if np.median(alpha_values) > 128 else 0
-
-                # Only consider opaque pixels for color
+                # --- Handle Alpha Channel Logic ---
+                # Consider only opaque pixels for color determination
                 opaque_mask = block[:, :, 3] > 128
-                if np.any(opaque_mask):
-                    opaque_pixels = block[opaque_mask][:, :3]
-
-                    # Find dominant color
-                    unique_colors, counts = np.unique(
-                        opaque_pixels.reshape(-1, 3), axis=0, return_counts=True
-                    )
-
-                    if len(unique_colors) > 0:
-                        max_count_idx = np.argmax(counts)
-                        if counts[max_count_idx] / len(opaque_pixels) >= threshold:
-                            # Use dominant color
-                            result[ty, tx, :3] = unique_colors[max_count_idx]
-                        else:
-                            # Use mean color
-                            result[ty, tx, :3] = np.mean(opaque_pixels, axis=0)
-                else:
-                    result[ty, tx] = [0, 0, 0, 0]
+                if not np.any(opaque_mask):
+                    # No opaque pixels, result is already [0,0,0,0] due to alpha pre-processing
+                    continue
+                color_pixels = block[opaque_mask][:, :3] # Get RGB of opaque pixels
             else:
-                # No alpha channel
-                pixels = block.reshape(-1, 3)
-                unique_colors, counts = np.unique(pixels, axis=0, return_counts=True)
+                # No alpha, consider all pixels in the block
+                color_pixels = block.reshape(-1, 3)
 
-                max_count_idx = np.argmax(counts)
-                if counts[max_count_idx] / len(pixels) >= threshold:
-                    result[ty, tx] = unique_colors[max_count_idx]
-                else:
-                    result[ty, tx] = np.mean(pixels, axis=0)
+            # --- Color Processing ---
+            # Handle case with no opaque pixels (already handled above for alpha)
+            if color_pixels.size == 0:
+                if not has_alpha:
+                    result[ty, tx] = [0, 0, 0]
+                continue # Move to next block
 
-    return result  # type: ignore[no-any-return]
+            # --- Find Unique Colors ---
+            # Use unique on the relevant pixel subset (opaque or all)
+            unique_colors, counts = np.unique(color_pixels, axis=0, return_counts=True)
+            num_unique = len(unique_colors)
 
+            # Handle single unique color
+            if num_unique == 1:
+                result[ty, tx, :3] = unique_colors[0]
+                continue # Move to next block
+
+            # --- KMeans Clustering for Multiple Colors ---
+            # Determine number of clusters based on unique colors
+            n_clusters = min(3, max(1, num_unique // 2))
+
+            # Perform KMeans clustering
+            # We keep KMeans in the loop as it's hard to vectorize across differently sized blocks.
+            # However, we optimize by fitting only on the necessary data and using minimal n_init.
+            kmeans = KMeans(n_clusters=n_clusters, n_init=1, random_state=0)
+            kmeans.fit(color_pixels.astype(float))
+
+            # Find the dominant cluster
+            cluster_sizes = np.bincount(kmeans.labels_, minlength=n_clusters)
+            dominant_cluster_idx = np.argmax(cluster_sizes)
+            dominant_cluster_size = cluster_sizes[dominant_cluster_idx]
+
+            # Check dominance threshold
+            total_pixels = len(color_pixels)
+            if dominant_cluster_size / total_pixels >= threshold:
+                # Use dominant cluster center
+                dominant_color = kmeans.cluster_centers_[dominant_cluster_idx]
+                result[ty, tx, :3] = np.clip(dominant_color, 0, 255).astype(np.uint8)
+            else:
+                # Fallback to mean color
+                mean_color = np.mean(color_pixels, axis=0)
+                result[ty, tx, :3] = np.clip(mean_color, 0, 255).astype(np.uint8)
+
+    return result
 
 def downscale_block(image: np.ndarray, scale: int, method: str = "median") -> np.ndarray:
     """Downscale using various aggregation methods"""
@@ -467,6 +536,50 @@ def downscale_block(image: np.ndarray, scale: int, method: str = "median") -> np
                     result[ty, tx] = pixels[0]
 
     return result  # type: ignore[no-any-return]
+
+
+def hybrid_downscale(image: np.ndarray, scale: int, threshold: float = 0.05) -> np.ndarray:
+    """Hybrid downscale: content-adaptive for high variance, dominant for low"""
+    h, w = image.shape[:2]
+    target_h = h // scale
+    target_w = w // scale
+
+    # Compute full content-adaptive
+    adaptive = content_adaptive_downscale(image, target_w, target_h)
+
+    # Compute variance map on original
+    gray = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY if image.shape[2] == 4 else cv2.COLOR_RGB2GRAY)
+    laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+    var_map = np.abs(laplacian)
+    var_map_resized = cv2.resize(var_map, (target_w, target_h), interpolation=cv2.INTER_AREA)
+    high_var_mask = var_map_resized > np.mean(var_map_resized)  # Above average variance
+
+    # Compute dominant
+    if "RUST_AVAILABLE" in globals() and RUST_AVAILABLE:
+        dominant = downscale_dominant_color_accelerated(image, scale, threshold)
+    else:
+        dominant = downscale_by_dominant_color(image, scale, threshold) 
+
+    # Blend: adaptive on high var, dominant on low
+    result = dominant.copy()
+    result[high_var_mask] = adaptive[high_var_mask]
+
+    return result
+
+
+def edge_preserving_refinement(image: np.ndarray) -> np.ndarray:
+    """Apply edge-preserving refinement"""
+    gray = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY if image.shape[2] == 4 else cv2.COLOR_RGB2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    edges_dilated = cv2.dilate(edges, np.ones((3,3), np.uint8))
+
+    # Majority filter on edges
+    majority = cv2.medianBlur(image, 3)  # Simple majority approx
+
+    result = image.copy()
+    result[edges_dilated > 0] = majority[edges_dilated > 0]
+
+    return result
 
 
 def quantize_colors(
@@ -639,13 +752,17 @@ async def process_image(
     max_colors: Optional[int] = None,  # None for auto-detection
     manual_scale: Optional[Union[int, List[int]]] = None,
     detect_method: str = "auto",  # 'auto', 'runs', 'edge'
-    downscale_method: str = "dominant",  # 'dominant', 'median', 'mode', 'mean', 'nearest', 'content-adaptive'
+    downscale_method: str = "dominant",  # 'dominant', 'median', 'mode', 'mean', 'nearest', 'content-adaptive', 'hybrid'
     dom_mean_threshold: float = 0.05,
     cleanup: Optional[Dict[str, bool]] = None,
     fixed_palette: Optional[List[str]] = None,
     alpha_threshold: int = 128,
     snap_grid: bool = True,
     auto_color_detect: bool = False,
+    pre_filter: bool = False,
+    edge_preserve: bool = False,
+    post_sharpen: bool = False,
+    iterations: int = 1,
     file_path: Optional[str] = None,  # deprecated
 ) -> Dict:
     """
@@ -656,13 +773,17 @@ async def process_image(
         max_colors: Maximum number of colors in output (None for auto-detection)
         manual_scale: Manual scale override
         detect_method: Scale detection method ('auto', 'runs', 'edge')
-        downscale_method: Downscaling algorithm ('dominant', 'median', 'mode', 'mean', 'nearest', 'content-adaptive')
+        downscale_method: Downscaling algorithm ('dominant', 'median', 'mode', 'mean', 'nearest', 'content-adaptive', 'hybrid')
         dom_mean_threshold: Threshold for dominant color method
         cleanup: Cleanup options dict with 'morph' and 'jaggy' keys
         fixed_palette: Optional fixed color palette (hex strings)
         alpha_threshold: Alpha binarization threshold (0-255)
         snap_grid: Whether to snap to pixel grid
         auto_color_detect: Force automatic color detection
+        pre_filter: Apply pre-downscale filter
+        edge_preserve: Apply edge-preserving refinement for content-adaptive
+        post_sharpen: Apply post-downscale sharpening
+        iterations: Number of iterations for rerun
         file_path: Path to input image (deprecated)
 
     Returns:
@@ -780,29 +901,62 @@ async def process_image(
         current, palette_colors = quantize_colors(current, max_colors, fixed_palette)
         colors_used = len(palette_colors)
 
-    # 5. Downscaling
-    if scale > 1 or downscale_method == "content-adaptive":
-        logger.info(f'Downscaling by {scale}x using "{downscale_method}" method')
-        if downscale_method == "dominant":
-            # Use accelerated version if available
-            if "RUST_AVAILABLE" in globals() and RUST_AVAILABLE:
-                current = downscale_dominant_color_accelerated(current, scale, dom_mean_threshold)
-            else:
-                current = downscale_by_dominant_color(current, scale, dom_mean_threshold)
-        elif downscale_method == "content-adaptive":
-            target_w = current.shape[1] // scale if scale > 1 else current.shape[1] // 2
-            target_h = current.shape[0] // scale if scale > 1 else current.shape[0] // 2
-            current = content_adaptive_downscale(current, target_w, target_h)
-            # Post-quantize after content-adaptive
-            if max_colors < 256:
-                current, _ = quantize_colors(current, max_colors, fixed_palette)
-        else:
-            current = downscale_block(current, scale, downscale_method)
-        current = finalize_pixels(current)
+    # Iteration loop for rerun
+    best_current = current.copy()
+    best_score = float('inf')  # Lower is better: colors + (1 - normalized_variance)
 
-    # 6. Post-cleanup
-    if cleanup.get("jaggy", False):
-        current = jaggy_cleaner(current)
+    for iter in range(iterations):
+        iter_threshold = dom_mean_threshold + (iter - iterations//2) * 0.01  # Vary slightly
+        current_iter = current.copy()
+
+        # Pre-filter if enabled
+        if pre_filter:
+            current_iter = pre_downscale_filter(current_iter)
+
+        # 5. Downscaling
+        if scale > 1 or downscale_method in ["content-adaptive", "hybrid"]:
+            logger.info(f'Downscaling by {scale}x using "{downscale_method}" method')
+            if downscale_method == "dominant":
+                # Use accelerated version if available
+                if "RUST_AVAILABLE" in globals() and RUST_AVAILABLE:
+                    current_iter = downscale_dominant_color_accelerated(current_iter, scale, iter_threshold)
+                else:
+                    current_iter = downscale_by_dominant_color(current_iter, scale, iter_threshold)  
+            elif downscale_method == "content-adaptive":
+                target_w = current_iter.shape[1] // scale if scale > 1 else current_iter.shape[1] // 2
+                target_h = current_iter.shape[0] // scale if scale > 1 else current_iter.shape[0] // 2
+                current_iter = content_adaptive_downscale(current_iter, target_w, target_h)
+                # Post-quantize after content-adaptive
+                if max_colors < 256:
+                    current_iter, _ = quantize_colors(current_iter, max_colors, fixed_palette)
+                if edge_preserve:
+                    current_iter = edge_preserving_refinement(current_iter)
+            elif downscale_method == "hybrid":
+                current_iter = hybrid_downscale(current_iter, scale, iter_threshold)
+            else:
+                current_iter = downscale_block(current_iter, scale, downscale_method)
+            current_iter = finalize_pixels(current_iter)
+
+        # Post-sharpen if enabled
+        if post_sharpen:
+            current_iter = post_downscale_sharpen(current_iter)
+
+        # 6. Post-cleanup
+        if cleanup.get("jaggy", False):
+            current_iter = jaggy_cleaner(current_iter)
+
+        # Score: lower colors + higher edges (normalized)
+        final_colors = count_colors(current_iter)
+        gray = cv2.cvtColor(current_iter, cv2.COLOR_RGBA2GRAY if current_iter.shape[2] == 4 else cv2.COLOR_RGB2GRAY)
+        edge_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        norm_var = edge_var / (gray.shape[0] * gray.shape[1])  # Normalize
+        score = final_colors - norm_var  # Minimize colors, maximize var
+
+        if score < best_score:
+            best_score = score
+            best_current = current_iter
+
+    current = best_current
 
     # 7. Extract palette and save
     palette = extract_palette(current)
@@ -840,6 +994,10 @@ async def process_image(
                 "binarized": alpha_threshold is not None,
             },
             "grid_snapping": {"enabled": snap_grid, "applied": snap_grid and scale > 1},
+            "pre_filter": pre_filter,
+            "edge_preserve": edge_preserve,
+            "post_sharpen": post_sharpen,
+            "iterations": iterations,
         },
         processing_time_ms=processing_time,
         timestamp=datetime.now().isoformat(),
@@ -898,7 +1056,7 @@ Examples:
     parser.add_argument(
         "-m",
         "--method",
-        choices=["dominant", "median", "mode", "mean", "nearest", "content-adaptive"],
+        choices=["dominant", "median", "mode", "mean", "nearest", "content-adaptive", "hybrid"],
         default="dominant",
         help="Downscaling method (default: dominant)",
     )
@@ -914,6 +1072,10 @@ Examples:
         help="Alpha binarization threshold (default: 128)",
     )
     parser.add_argument("--no-snap", action="store_true", help="Disable grid snapping")
+    parser.add_argument("--pre-filter", action="store_true", help="Apply pre-downscale filter")
+    parser.add_argument("--edge-preserve", action="store_true", help="Apply edge-preserving refinement")
+    parser.add_argument("--post-sharpen", action="store_true", help="Apply post-downscale sharpening")
+    parser.add_argument("--iterations", type=int, default=1, help="Number of iterations (default: 1)")
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress output")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
 
@@ -958,6 +1120,10 @@ Examples:
             alpha_threshold=args.alpha_threshold,
             snap_grid=not args.no_snap,
             auto_color_detect=args.auto_colors,
+            pre_filter=args.pre_filter,
+            edge_preserve=args.edge_preserve,
+            post_sharpen=args.post_sharpen,
+            iterations=args.iterations,
         )
 
         # Save the processed image

@@ -2,6 +2,10 @@ use ndarray::{Array3, ArrayView3};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
+use pyo3::prelude::*;
+use rand::{Rng, SeedableRng};
+use rand::rngs::StdRng;
+
 /// Simple 2x2 matrix for covariance operations
 #[derive(Clone, Copy, Debug)]
 struct Matrix2x2 {
@@ -97,21 +101,15 @@ impl GaussianKernel {
         }
     }
 
-    fn evaluate_weight(&self, x: f32, y: f32) -> f32 {
+    fn evaluate_weight(&self, x: f32, y: f32, inv_sigma: &Matrix2x2) -> f32 {
         let dx = x - self.mu[0];
         let dy = y - self.mu[1];
-
-        if let Some(inv_sigma) = self.sigma.inverse() {
-            let exponent =
-                dx * dx * inv_sigma.a + 2.0 * dx * dy * inv_sigma.b + dy * dy * inv_sigma.d;
-            (-0.5 * exponent).exp()
-        } else {
-            0.0
-        }
+        let exponent = dx * dx * inv_sigma.a + 2.0 * dx * dy * inv_sigma.b + dy * dy * inv_sigma.d;
+        (-0.5 * exponent).exp()
     }
 }
 
-/// Fast content-adaptive downscaling using EM-C algorithm
+/// Extremely fast content-adaptive downscaling using EM-C algorithm
 pub fn content_adaptive_downscale_rust(
     lab_image: &ArrayView3<f32>,
     target_w: usize,
@@ -137,60 +135,60 @@ pub fn content_adaptive_downscale_rust(
         })
         .collect();
 
-    // Pre-allocate pixel positions for efficiency
-    let pixel_positions: Vec<(usize, usize, f32, f32)> = (0..h_in)
-        .flat_map(|y| (0..w_in).map(move |x| (y, x, x as f32, y as f32)))
-        .collect();
+    let num_kernels = kernels.len();
+    let search_radius = 2.0 * rx.max(ry);
+    let search_radius_sq = search_radius * search_radius;
 
     // EM-C iterations
-    for iteration in 0..num_iterations {
-        // E-Step: Compute weights in parallel chunks
-        let chunk_size = 1000; // Process pixels in chunks for memory efficiency
-        let num_kernels = kernels.len();
+    for _ in 0..num_iterations {
+        // Precompute inverse sigmas (always Some after clamping/initialization)
+        let inv_sigmas: Vec<Matrix2x2> = kernels
+            .par_iter()
+            .map(|kernel| kernel.sigma.inverse().unwrap())
+            .collect();
 
-        // Pre-allocate weight storage
-        let mut all_weights: Vec<Vec<(usize, f32)>> = vec![Vec::new(); num_kernels];
-        let mut gamma_sums = vec![1e-9f32; h_in * w_in];
+        // E-Step: Compute weights in parallel, using local pixel bounds per kernel for efficiency
+        let mut all_weights: Vec<Vec<(usize, f32)>> = (0..num_kernels)
+            .into_par_iter()
+            .map(|k| {
+                let kernel = &kernels[k];
+                let inv_sigma = &inv_sigmas[k];
 
-        // Process in chunks to manage memory
-        for chunk in pixel_positions.chunks(chunk_size) {
-            let chunk_weights: Vec<Vec<(usize, f32)>> = (0..num_kernels)
-                .into_par_iter()
-                .map(|k| {
-                    let kernel = &kernels[k];
-                    let mut weights = Vec::new();
+                let x_min = (kernel.mu[0] - search_radius).max(0.0) as usize;
+                let x_max = (kernel.mu[0] + search_radius).min(w_in as f32 - 1.0) as usize + 1;
+                let y_min = (kernel.mu[1] - search_radius).max(0.0) as usize;
+                let y_max = (kernel.mu[1] + search_radius).min(h_in as f32 - 1.0) as usize + 1;
 
-                    // Limit search region for efficiency
-                    let search_radius = 2.0 * rx.max(ry);
+                let approx_capacity = (x_max - x_min) * (y_max - y_min);
+                let mut weights = Vec::with_capacity(approx_capacity / 2); // Conservative estimate
 
-                    for &(y, x, fx, fy) in chunk {
+                for y in y_min..y_max {
+                    for x in x_min..x_max {
+                        let fx = x as f32;
+                        let fy = y as f32;
                         let dx = fx - kernel.mu[0];
                         let dy = fy - kernel.mu[1];
                         let dist_sq = dx * dx + dy * dy;
-
-                        if dist_sq <= search_radius * search_radius {
-                            let weight = kernel.evaluate_weight(fx, fy);
+                        if dist_sq <= search_radius_sq {
+                            let weight = kernel.evaluate_weight(fx, fy, inv_sigma);
                             if weight > 1e-5 {
-                                weights.push((y * w_in + x, weight));
+                                let pixel_idx = y * w_in + x;
+                                weights.push((pixel_idx, weight));
                             }
                         }
                     }
-                    weights
-                })
-                .collect();
-
-            // Merge chunk weights
-            for (k, weights) in chunk_weights.into_iter().enumerate() {
-                all_weights[k].extend(weights);
-            }
-        }
+                }
+                weights
+            })
+            .collect();
 
         // Normalize weights
+        let mut gamma_sums = vec![1e-9f32; h_in * w_in];
         for k in 0..num_kernels {
-            let w_sum: f32 = all_weights[k].iter().map(|(_, w)| w).sum::<f32>() + 1e-9;
-            for (pixel_idx, weight) in &mut all_weights[k] {
+            let w_sum: f32 = all_weights[k].iter().map(|&(_, w)| w).sum::<f32>() + 1e-9;
+            for &mut (pixel_idx, ref mut weight) in all_weights[k].iter_mut() {
                 *weight /= w_sum;
-                gamma_sums[*pixel_idx] += *weight;
+                gamma_sums[pixel_idx] += *weight;
             }
         }
 
@@ -387,137 +385,372 @@ pub fn downscale_mode(image: &ArrayView3<u8>, scale: usize) -> Array3<u8> {
     output
 }
 
-/// Downscale image using dominant color method
+// Enhanced K-Means with k-means++ initialization to match scikit-learn
+struct KMeansResult {
+    centroids: Vec<[f32; 3]>,
+    labels: Vec<usize>,
+}
+
+fn kmeans_plusplus(points: &Vec<[f32; 3]>, k: usize, rng: &mut StdRng) -> Vec<[f32; 3]> {
+    let n = points.len();
+    if k >= n {
+        // Return all points if k >= n
+        return points.iter().take(k).cloned().collect();
+    }
+
+    let mut centroids = Vec::with_capacity(k);
+    
+    // Choose first centroid randomly
+    let first_idx = rng.gen_range(0..n);
+    centroids.push(points[first_idx]);
+    
+    // Choose remaining centroids
+    for _ in 1..k {
+        // Calculate distances to nearest centroid for each point
+        let mut distances = Vec::with_capacity(n);
+        for point in points {
+            let mut min_dist = f32::MAX;
+            for centroid in &centroids {
+                let dist = euclidean_distance_squared(point, centroid);
+                if dist < min_dist {
+                    min_dist = dist;
+                }
+            }
+            distances.push(min_dist);
+        }
+        
+        // Choose next centroid with probability proportional to distance^2
+        let total_weight: f32 = distances.iter().sum();
+        if total_weight <= 0.0 {
+            // All points are at same location, pick randomly
+            let idx = rng.gen_range(0..n);
+            centroids.push(points[idx]);
+        } else {
+            let mut rand_val: f32 = rng.gen();
+            rand_val *= total_weight;
+            
+            let mut cumulative = 0.0;
+            let mut chosen_idx = 0;
+            for (i, &weight) in distances.iter().enumerate() {
+                cumulative += weight;
+                if cumulative >= rand_val {
+                    chosen_idx = i;
+                    break;
+                }
+            }
+            centroids.push(points[chosen_idx]);
+        }
+    }
+    
+    centroids
+}
+
+fn euclidean_distance_squared(a: &[f32; 3], b: &[f32; 3]) -> f32 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    let dz = a[2] - b[2];
+    dx * dx + dy * dy + dz * dz
+}
+
+fn euclidean_distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
+    euclidean_distance_squared(a, b).sqrt()
+}
+
+fn kmeans_with_seed(points: &Vec<[f32; 3]>, k: usize, max_iters: usize, seed: u64) -> Option<KMeansResult> {
+    if points.is_empty() || k == 0 {
+        return None;
+    }
+
+    if k >= points.len() {
+        // Special case: each point is its own cluster
+        let mut labels = Vec::with_capacity(points.len());
+        let mut centroids = Vec::with_capacity(k);
+        
+        for i in 0..points.len() {
+            labels.push(i);
+            centroids.push(points[i]);
+        }
+        // Fill remaining centroids if needed
+        while centroids.len() < k {
+            centroids.push(points[0]); // pad with first point
+            labels.push(0);
+        }
+        
+        return Some(KMeansResult { centroids, labels });
+    }
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut centroids = kmeans_plusplus(points, k, &mut rng);
+    
+    let mut labels = vec![0; points.len()];
+    let mut prev_labels = vec![usize::MAX; points.len()];
+    
+    for _iter in 0..max_iters {
+        // Assignment step
+        let mut changed = false;
+        for (i, point) in points.iter().enumerate() {
+            let mut min_dist = f32::MAX;
+            let mut best_centroid = 0;
+            
+            for (j, centroid) in centroids.iter().enumerate() {
+                let dist = euclidean_distance_squared(point, centroid);
+                if dist < min_dist {
+                    min_dist = dist;
+                    best_centroid = j;
+                }
+            }
+            
+            if labels[i] != best_centroid {
+                changed = true;
+                labels[i] = best_centroid;
+            }
+        }
+        
+        if !changed {
+            break;
+        }
+        
+        // Update step
+        let mut new_centroids = vec![[0.0, 0.0, 0.0]; k];
+        let mut counts = vec![0; k];
+        
+        for (i, &label) in labels.iter().enumerate() {
+            if label < k {
+                new_centroids[label][0] += points[i][0];
+                new_centroids[label][1] += points[i][1];
+                new_centroids[label][2] += points[i][2];
+                counts[label] += 1;
+            }
+        }
+        
+        // Calculate new centroids
+        for i in 0..k {
+            if counts[i] > 0 {
+                new_centroids[i][0] /= counts[i] as f32;
+                new_centroids[i][1] /= counts[i] as f32;
+                new_centroids[i][2] /= counts[i] as f32;
+            } else {
+                // Keep old centroid if no points assigned
+                new_centroids[i] = centroids[i];
+            }
+        }
+        
+        centroids = new_centroids;
+    }
+    
+    Some(KMeansResult { centroids, labels })
+}
+
+/// Extremely fast dominant color downscaling using KMeans
 pub fn downscale_dominant(image: &ArrayView3<u8>, scale: usize, threshold: f32) -> Array3<u8> {
     let (height, width, channels) = image.dim();
     let target_h = height / scale;
     let target_w = width / scale;
     let has_alpha = channels == 4;
 
-    // Collect results in parallel
+    // Initialize result array
+    let mut result = Array3::<u8>::zeros((target_h, target_w, channels));
+
+    // --- Pre-process Alpha Channel ---
+    if has_alpha {
+        for ty in 0..target_h {
+            for tx in 0..target_w {
+                let y_start = ty * scale;
+                let x_start = tx * scale;
+                let y_end = (ty + 1) * scale;
+                let x_end = (tx + 1) * scale;
+
+                // Collect alpha values for this block
+                let mut alpha_values = Vec::with_capacity(scale * scale);
+                for y in y_start..y_end {
+                    for x in x_start..x_end {
+                        alpha_values.push(image[(y, x, 3)]);
+                    }
+                }
+
+                // Calculate median
+                alpha_values.sort_unstable();
+                let median_alpha = alpha_values[alpha_values.len() / 2];
+                result[(ty, tx, 3)] = if median_alpha > 128 { 255 } else { 0 };
+            }
+        }
+    }
+
+    // --- Process RGB channels ---
     let results: Vec<_> = (0..target_h)
         .into_par_iter()
         .flat_map(|ty| {
             (0..target_w)
                 .into_par_iter()
                 .map(move |tx| {
-                    let mut color_counts = HashMap::with_capacity(scale * scale);
-                    let mut alpha_values = Vec::with_capacity(scale * scale);
-                    let mut total_opaque = 0u32;
-
-                    // Scan the scale x scale block
                     let y_start = ty * scale;
                     let x_start = tx * scale;
-                    let y_end = ((ty + 1) * scale).min(height);
-                    let x_end = ((tx + 1) * scale).min(width);
+                    let y_end = (ty + 1) * scale;
+                    let x_end = (tx + 1) * scale;
 
-                    for y in y_start..y_end {
-                        for x in x_start..x_end {
-                            if has_alpha {
-                                let alpha = image[(y, x, 3)];
-                                alpha_values.push(alpha);
+                    // Extract block pixels
+                    let mut color_pixels = Vec::new();
+                    let mut has_opaque_pixels = false;
 
-                                if alpha >= 128 {
-                                    // Pack RGB into 24-bit integer (same as JavaScript)
-                                    let r = image[(y, x, 0)] as u32;
-                                    let g = image[(y, x, 1)] as u32;
-                                    let b = image[(y, x, 2)] as u32;
-                                    let color_key = (r << 16) | (g << 8) | b;
-
-                                    *color_counts.entry(color_key).or_insert(0) += 1;
-                                    total_opaque += 1;
+                    if has_alpha {
+                        // Collect only opaque pixels
+                        for y in y_start..y_end {
+                            for x in x_start..x_end {
+                                if image[(y, x, 3)] > 128 {
+                                    color_pixels.push([
+                                        image[(y, x, 0)] as f32,
+                                        image[(y, x, 1)] as f32,
+                                        image[(y, x, 2)] as f32,
+                                    ]);
+                                    has_opaque_pixels = true;
                                 }
-                            } else {
-                                let r = image[(y, x, 0)] as u32;
-                                let g = image[(y, x, 1)] as u32;
-                                let b = image[(y, x, 2)] as u32;
-                                let color_key = (r << 16) | (g << 8) | b;
-
-                                *color_counts.entry(color_key).or_insert(0) += 1;
-                                total_opaque += 1;
                             }
-                        }
-                    }
-
-                    // Calculate output pixel
-                    let mut pixel = vec![0u8; channels];
-
-                    if has_alpha && !alpha_values.is_empty() {
-                        // Calculate median alpha efficiently
-                        alpha_values.sort_unstable();
-                        let median_alpha = alpha_values[alpha_values.len() / 2];
-                        let final_alpha = if median_alpha >= 128 { 255 } else { 0 };
-
-                        pixel[3] = final_alpha;
-
-                        if final_alpha == 0 {
-                            // Transparent pixel - set to black
-                            pixel[0] = 0;
-                            pixel[1] = 0;
-                            pixel[2] = 0;
-                            return (ty, tx, pixel);
-                        }
-                    }
-
-                    if total_opaque > 0 {
-                        // Find dominant color
-                        let (dominant_color, max_count) = color_counts
-                            .iter()
-                            .max_by_key(|(_, &count)| count)
-                            .map(|(&color, &count)| (color, count))
-                            .unwrap_or((0, 0));
-
-                        let threshold_count = (total_opaque as f32 * threshold) as u32;
-
-                        if max_count >= threshold_count {
-                            // Use dominant color
-                            pixel[0] = ((dominant_color >> 16) & 0xFF) as u8;
-                            pixel[1] = ((dominant_color >> 8) & 0xFF) as u8;
-                            pixel[2] = (dominant_color & 0xFF) as u8;
-                        } else {
-                            // Calculate mean color
-                            let mut r_sum = 0u64;
-                            let mut g_sum = 0u64;
-                            let mut b_sum = 0u64;
-
-                            for (&color, &count) in &color_counts {
-                                let count = count as u64;
-                                r_sum += ((color >> 16) & 0xFF) as u64 * count;
-                                g_sum += ((color >> 8) & 0xFF) as u64 * count;
-                                b_sum += (color & 0xFF) as u64 * count;
-                            }
-
-                            pixel[0] = (r_sum / total_opaque as u64) as u8;
-                            pixel[1] = (g_sum / total_opaque as u64) as u8;
-                            pixel[2] = (b_sum / total_opaque as u64) as u8;
-                        }
-
-                        if !has_alpha {
-                            pixel[3] = 255;
                         }
                     } else {
-                        // No opaque pixels - set to black
-                        pixel[0] = 0;
-                        pixel[1] = 0;
-                        pixel[2] = 0;
-                        if !has_alpha {
-                            pixel[3] = 255;
+                        // Collect all pixels
+                        for y in y_start..y_end {
+                            for x in x_start..x_end {
+                                color_pixels.push([
+                                    image[(y, x, 0)] as f32,
+                                    image[(y, x, 1)] as f32,
+                                    image[(y, x, 2)] as f32,
+                                ]);
+                            }
                         }
+                        has_opaque_pixels = !color_pixels.is_empty();
                     }
 
-                    (ty, tx, pixel)
+                    // If no opaque pixels and has alpha, result is already [0,0,0,0] from alpha pre-processing
+                    if !has_opaque_pixels {
+                        return (ty, tx, None);
+                    }
+
+                    // If only one pixel, use it directly
+                    if color_pixels.len() == 1 {
+                        let pixel = [
+                            color_pixels[0][0] as u8,
+                            color_pixels[0][1] as u8,
+                            color_pixels[0][2] as u8,
+                        ];
+                        return (ty, tx, Some(pixel));
+                    }
+
+                    // Find unique colors for cluster count determination
+                    let mut unique_colors = HashMap::new();
+                    for pixel in &color_pixels {
+                        let key = (pixel[0] as u32, pixel[1] as u32, pixel[2] as u32);
+                        unique_colors.insert(key, ());
+                    }
+                    let num_unique = unique_colors.len();
+
+                    // Handle single unique color
+                    if num_unique == 1 {
+                        let pixel = [
+                            color_pixels[0][0] as u8,
+                            color_pixels[0][1] as u8,
+                            color_pixels[0][2] as u8,
+                        ];
+                        return (ty, tx, Some(pixel));
+                    }
+
+                    // Determine number of clusters
+                    let n_clusters = std::cmp::min(3, std::cmp::max(1, num_unique / 2));
+
+                    // Perform K-Means clustering with same parameters as Python
+                    // random_state=0, n_init=1
+                    match kmeans_with_seed(&color_pixels, n_clusters, 50, 0) {
+                        Some(kmeans_result) => {
+                            // Count cluster sizes
+                            let mut cluster_sizes = vec![0; n_clusters];
+                            for &label in &kmeans_result.labels {
+                                if label < n_clusters {
+                                    cluster_sizes[label] += 1;
+                                }
+                            }
+
+                            // Find dominant cluster
+                            let dominant_cluster_idx = cluster_sizes
+                                .iter()
+                                .enumerate()
+                                .max_by_key(|(_, &size)| size)
+                                .map(|(idx, _)| idx)
+                                .unwrap_or(0);
+                            
+                            let dominant_cluster_size = cluster_sizes[dominant_cluster_idx];
+                            let total_pixels = color_pixels.len();
+
+                            // Check dominance threshold
+                            if (dominant_cluster_size as f32) / (total_pixels as f32) >= threshold {
+                                // Use dominant cluster center
+                                let center = &kmeans_result.centroids[dominant_cluster_idx];
+                                let pixel = [
+                                    center[0].round().clamp(0.0, 255.0) as u8,
+                                    center[1].round().clamp(0.0, 255.0) as u8,
+                                    center[2].round().clamp(0.0, 255.0) as u8,
+                                ];
+                                (ty, tx, Some(pixel))
+                            } else {
+                                // Fallback to mean color
+                                let mut r_sum = 0.0;
+                                let mut g_sum = 0.0;
+                                let mut b_sum = 0.0;
+                                for pixel in &color_pixels {
+                                    r_sum += pixel[0];
+                                    g_sum += pixel[1];
+                                    b_sum += pixel[2];
+                                }
+                                let count = color_pixels.len() as f32;
+                                let pixel = [
+                                    (r_sum / count).round().clamp(0.0, 255.0) as u8,
+                                    (g_sum / count).round().clamp(0.0, 255.0) as u8,
+                                    (b_sum / count).round().clamp(0.0, 255.0) as u8,
+                                ];
+                                (ty, tx, Some(pixel))
+                            }
+                        }
+                        None => {
+                            // Fallback to mean color if K-Means fails
+                            let mut r_sum = 0.0;
+                            let mut g_sum = 0.0;
+                            let mut b_sum = 0.0;
+                            for pixel in &color_pixels {
+                                r_sum += pixel[0];
+                                g_sum += pixel[1];
+                                b_sum += pixel[2];
+                            }
+                            let count = color_pixels.len() as f32;
+                            let pixel = [
+                                (r_sum / count).round().clamp(0.0, 255.0) as u8,
+                                (g_sum / count).round().clamp(0.0, 255.0) as u8,
+                                (b_sum / count).round().clamp(0.0, 255.0) as u8,
+                            ];
+                            (ty, tx, Some(pixel))
+                        }
+                    }
                 })
                 .collect::<Vec<_>>()
         })
         .collect();
 
-    // Build output array from results
-    let mut output = Array3::<u8>::zeros((target_h, target_w, channels));
-    for (ty, tx, pixel) in results {
-        for (c, &value) in pixel.iter().enumerate() {
-            output[(ty, tx, c)] = value;
+    // Apply RGB results
+    for (ty, tx, rgb_opt) in results {
+        if let Some(rgb) = rgb_opt {
+            result[(ty, tx, 0)] = rgb[0];
+            result[(ty, tx, 1)] = rgb[1];
+            result[(ty, tx, 2)] = rgb[2];
+            
+            // Set alpha to 255 if no alpha channel
+            if !has_alpha {
+                result[(ty, tx, 3)] = 255;
+            }
+        } else if !has_alpha {
+            // No opaque pixels and no alpha channel - set to black with full opacity
+            result[(ty, tx, 0)] = 0;
+            result[(ty, tx, 1)] = 0;
+            result[(ty, tx, 2)] = 0;
+            result[(ty, tx, 3)] = 255;
         }
     }
 
-    output
+    result
 }

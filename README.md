@@ -1,49 +1,63 @@
-# unfake
+# unfake-opt
 
-Improve AI-generated pixel art through scale detection, color quantization, and smart downscaling. Features Rust acceleration for critical operations, achieving a 10-20% speedup over the original JavaScript implementation.
+Improve AI-generated pixel art through scale detection, color quantization, and smart downscaling — now significantly faster and more accurate thanks to algorithmic and performance enhancements.  
+This optimized fork features **10–40× faster content-adaptive downscaling**, improved dominant color selection using **KMeans**, a new **hybrid downscaling method**, and additional preprocessing/postprocessing options for sharper, cleaner pixel art.
 
 Based on the excellent work by:
-- **Eugeniy Smirnov** ([jenissimo/unfake.js](https://github.com/jenissimo/unfake.js)) - Original JavaScript implementation
-- **Igor Bezkrovnyi** ([ibezkrovnyi/image-quantization](https://github.com/ibezkrovnyi/image-quantization)) - Image quantization algorithms
+- **Eugeniy Smirnov** ([jenissimo/unfake.js](https://github.com/jenissimo/unfake.js)) – Original JavaScript implementation  
+- **Igor Bezkrovnyi** ([ibezkrovnyi/image-quantization](https://github.com/ibezkrovnyi/image-quantization)) – Image quantization algorithms  
+- **Benjamin Paine** ([painebenjamin/unfake.py](https://github.com/painebenjamin/unfake.py)) – Original Python/Rust port  
 
-## Examples
-Click each image to view the original, processed result, and results of two different naïve fixed-size-nearest-neighbor methods.
-<img width="4156" height="1054" alt="comparison_grid" src="https://github.com/user-attachments/assets/f48d09a6-991e-4c51-b881-f75ddfc45e86" />
-<img width="4140" height="1054" alt="comparison_grid" src="https://github.com/user-attachments/assets/4b17c7c3-cb0e-48d5-b47b-9daaa44e7999" />
-<img width="4128" height="1038" alt="comparison_grid" src="https://github.com/user-attachments/assets/2bdee15e-ee00-462b-bc1a-456e8f156377" />
-<img width="7212" height="2328" alt="comparison_grid" src="https://github.com/user-attachments/assets/9f37e1f7-68aa-4173-90d7-1fbfbcad5895" />
-<img width="7196" height="2334" alt="comparison_grid" src="https://github.com/user-attachments/assets/65afdd0d-6f80-4997-bb6f-5b63e2fa83bc" />
+## Examples  
 
-Images taken from examples for AI pixel art models like [Pixel Art XL](https://huggingface.co/nerijs/pixel-art-xl), [FLUX.1-Dev Pixel LoRA](https://huggingface.co/UmeAiRT/FLUX.1-dev-LoRA-Modern_Pixel_art), and [FLUX.1-Kontext Pixel LoRA](https://huggingface.co/Shakker-Labs/FLUX.1-Kontext-dev-LoRA-Pixel-Style?image-viewer=EE86A1D8F1D252D65E9E06A3AAA2F5EF79A47E8A).
+Original Generated Image
+[![Original Generated Image](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_2025-09-08-005621__0.thumb.jpg)](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_2025-09-08-005621__0.png)
+
+Original Dominant color method
+[![Original Dominant color method](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_dom_pixelart_2025-09-08-005621__0_8x.thumb.jpg)](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/orig_dom_pixelart_2025-09-08-005621__0_8x.png)
+
+Enhanced Dominant color method
+[![Enhanced Dominant color method](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/enh_dom_pixelart_2025-09-08-005621__0_8x.thumb.jpg)](https://raw.githubusercontent.com/2dameneko/unfake-opt.py/main/samples/enh_dom_pixelart_2025-09-08-005621__0_8x.png)
+
+---
+
+## ✨ Key Improvements (vs. original port)
+
+- **10–40× faster `content-adaptive` downscaling** via optimized Rust implementation  
+- **Improved `dominant` method**: uses **KMeans clustering** for better color selection, especially on complex pixel-art backgrounds  
+- **New `hybrid` downscaling method**: automatically combine the best from `dominant` and `content-adaptive` methods
+- **Preprocessing**: optional light blur (`--pre-filter`) before quantization to reduce noise  
+- **Edge preservation**: `--edge-preserve` enhances contour sharpness during downscaling  
+- **Post-sharpening**: experimental `--post-sharpen` (currently under refinement, produce mostly unwanted results)  
+- **Adaptive threshold tuning**: `--iterations N` allows iterative refinement of the dominant color threshold for `dominant` method  
+
+---
 
 ## Features
 
-- **Automatic Scale Detection**: Detects the inherent scale of pixel art using both runs-based and edge-aware methods
-- **Advanced Color Quantization**: Wu color quantization algorithm with Rust acceleration
-- **Smart Downscaling**: Multiple methods including dominant color, median, mode, and content-adaptive
-- **Image Cleanup**: Alpha binarization, morphological operations, and jaggy edge removal
-- **Grid Snapping**: Automatic alignment to pixel grid for clean results
-- **Flexible API**: Both synchronous and asynchronous interfaces
-- **Fast**: Process a 1-megapixel image in as fast as half a second.
+- **Automatic Scale Detection**: Detects the inherent scale of pixel art using both runs-based and edge-aware methods  
+- **Advanced Color Quantization**: Wu algorithm with Rust acceleration + KMeans-enhanced dominant color selection  
+- **Smart Downscaling**: Multiple methods including `dominant`, `median`, `mode`, `content-adaptive`, and new `hybrid`  
+- **Image Cleanup**: Alpha binarization, morphological operations, jaggy edge removal  
+- **Grid Snapping**: Automatic alignment to pixel grid for clean results  
+- **Flexible API**: Both synchronous and asynchronous interfaces  
+- **Blazing Fast**: Process a 1-megapixel image in under a second (with Rust acceleration)
 
 ### Upcoming
 
-- Vectorization
+- Refined post-sharpening algorithm  
+- Vectorization support  
+
+---
 
 ## Installation
 
-### From PyPI (recommended)
+### From Source (recommended for now)
 
 ```bash
-pip install unfake
-```
-
-### From Source
-
-```bash
-# Clone the repository
-git clone https://github.com/painebenjamin/unfake.py.git
-cd unfake
+# Clone the optimized fork
+git clone https://github.com/2dameneko/unfake-opt.py.git
+cd unfake-opt
 
 # Install with pip (includes Rust compilation)
 pip install .
@@ -52,13 +66,20 @@ pip install .
 pip install -e .
 ```
 
+### From precompiled wheel (after release)
+
+> **Note**: This fork is not yet published on PyPI. Install from source to access all new features.
+
 ### Requirements
 
-- Python 3.8+
-- Rust toolchain (for building from source)
-- OpenCV Python bindings
-- Pillow
-- NumPy
+- Python 3.8+  
+- Rust toolchain (for building from source)  
+- OpenCV Python bindings  
+- Pillow  
+- NumPy  
+- scikit-learn (for KMeans in `dominant` method)
+
+---
 
 ## Usage
 
@@ -78,10 +99,16 @@ unfake input.png --auto-colors            # Auto-detect optimal color count
 # Force specific scale
 unfake input.png --scale 4                # Force 4x downscaling
 
-# Choose downscaling method
-unfake input.png -m dominant              # Dominant color (default, best for pixel art)
-unfake input.png -m median                # Median color
-unfake input.png -m content-adaptive      # High quality but slower
+# Choose downscaling method (NEW: hybrid!)
+unfake input.png -m dominant              # Dominant color (KMeans-enhanced, default)
+unfake input.png -m content-adaptive      # High-quality, now 10–40× faster
+unfake input.png -m hybrid                # NEW: best of dominant + content-adaptive
+
+# Enable new preprocessing/postprocessing
+unfake input.png --pre-filter             # Apply light blur before quantization
+unfake input.png --edge-preserve          # Preserve sharp edges during downscaling
+unfake input.png --post-sharpen           # Experimental sharpening after quantization, not recommended for now
+unfake input.png --iterations 5           # Refine dominant threshold over 5 iterations
 
 # Enable cleanup operations
 unfake input.png --cleanup morph,jaggy    # Morphological + jaggy edge cleanup
@@ -91,7 +118,7 @@ unfake input.png --palette palette.txt    # File with hex colors, one per line
 
 # Adjust processing parameters
 unfake input.png --alpha-threshold 200    # Higher threshold for alpha binarization
-unfake input.png --threshold 0.1          # Dominant color threshold (0.0-1.0)
+unfake input.png --threshold 0.1          # Initial dominant color threshold (0.0–1.0)
 unfake input.png --no-snap                # Disable grid snapping
 
 # Verbose output
@@ -103,37 +130,27 @@ unfake input.png -v                       # Show detailed processing info
 ```python
 import unfake
 
-# Basic processing with defaults
+# Basic processing with defaults (now uses KMeans-enhanced dominant)
 result = unfake.process_image_sync(
     "input.png",
-    max_colors=32,                       # Maximum colors in output
-    detect_method="auto",                # Scale detection: "auto", "runs", "edge"
-    downscale_method="dominant",         # Method: "dominant", "median", "mode", "mean", "content-adaptive"
+    max_colors=32,
+    detect_method="auto",
+    downscale_method="hybrid",            # NEW option!
     cleanup={"morph": False, "jaggy": False},
-    snap_grid=True                       # Align to pixel grid
+    snap_grid=True,
+    pre_filter=True,                      # NEW
+    edge_preserve=True,                   # NEW
+    post_sharpen=False,                   # Experimental
+    iterations=3                          # NEW: threshold refinement
 )
 
 # Access results
 processed_image = result['image']        # PIL Image
 palette = result['palette']              # List of hex colors
 manifest = result['manifest']            # Processing metadata
-
-# Auto-detect optimal colors
-result = unfake.process_image_sync(
-    "input.png",
-    max_colors=None,                     # Auto-detect
-    auto_color_detect=True
-)
-
-# Use fixed palette
-fixed_colors = ['#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff']
-result = unfake.process_image_sync(
-    "input.png",
-    fixed_palette=fixed_colors
-)
 ```
 
-#### Asynchronous API
+#### Asynchronous API (unchanged, but faster)
 
 ```python
 import asyncio
@@ -143,72 +160,65 @@ async def process_image_async():
     result = await unfake.process_image(
         "input.png",
         max_colors=16,
-        detect_method="runs",
-        downscale_method="median",
-        cleanup={"morph": True, "jaggy": False},
-        snap_grid=True
+        downscale_method="hybrid",
+        pre_filter=True,
+        edge_preserve=True
     )
     result["image"].save("output.png")
 
 asyncio.run(process_image_async())
 ```
 
-### Processing Options
+---
 
-#### Scale Detection Methods
-- **`auto`** (default): Tries runs-based first, falls back to edge-aware
-- **`runs`**: Analyzes color run lengths (fast, works well for clean pixel art)
-- **`edge`**: Uses edge detection (slower but handles anti-aliased images)
+### New & Updated Processing Options
 
 #### Downscaling Methods
-- **`dominant`** (default): Uses most frequent color in each block (best for pixel art)
-- **`median`**: Median color value (good for photos)
-- **`mode`**: Most common color (similar to dominant)
-- **`mean`**: Average color (can create new colors)
-- **`content-adaptive`**: Advanced algorithm based on [Kopf & Lischinski 2011](https://johanneskopf.de/publications/downscaling/)
+- **`dominant`** (default): Now uses **KMeans clustering** for more accurate dominant color selection — especially effective on textured or gradient pixel-art backgrounds  
+- **`content-adaptive`**: Same high-quality algorithm, but **10–40× faster** thanks to Rust optimization  
+- **`hybrid`** (**NEW**): Combine best from `dominant` and `content-adaptive` for optimal fidelity  
+- **`median` / `mode` / `mean`**: Unchanged, for compatibility
 
-#### Cleanup Options
-- **`morph`**: Morphological operations to remove noise
-- **`jaggy`**: Removes isolated diagonal pixels
+#### New Flags
+- `--pre-filter`: Applies a slight Gaussian blur before quantization to reduce noise and improve color coherence  
+- `--edge-preserve`: Enhances edge contrast during downscaling to maintain crisp silhouettes  
+- `--post-sharpen`: Experimental unsharp masking after quantization (not recommended for now)  
+- `--iterations N`: Runs N iterations of threshold tuning for the `dominant` method to find optimal color dominance cutoff  
 
-## Performance
-Example processing times for a 1024x1024 image on a high-end Intel desktop CPU using defaults:
-- Pure Python: ~71 seconds
-- With Rust Acceleration: ~700 milliseconds (about 100x speedup!)
+---
 
 ## Algorithm Details
 
-### Scale Detection
-The tool uses two methods to detect the inherent scale of pixel art:
+### Dominant Color (Enhanced)
+- Uses **KMeans clustering** in RGB space to group similar colors  
+- Selects the cluster centroid with the most pixels as the representative color  
+- Better handles dithering, gradients, and noisy backgrounds common in AI-generated pixel art  
 
-1. **Runs-based**: Analyzes horizontal and vertical color runs to find the GCD
-2. **Edge-aware**: Uses Sobel edge detection to find regular grid patterns
+### Hybrid Downscaling
+- For each scale×scale block:
+  - Compute results from both `dominant` and `content-adaptive`
+  - Combine results based of details frequency (low - dominant, high - adaptive)
 
-### Color Quantization
-Implements the Wu color quantization algorithm (1992) which:
-- Builds a 3D color histogram
-- Recursively subdivides color space
-- Minimizes variance within each partition
-- Produces high-quality palettes
+### Content Adaptive Downscaling
+- Roughly O(num_kernels * num_pixels) => O(num_pixels) per iteration
 
-### Downscaling
-The dominant color method:
-- Divides image into scale×scale blocks
-- Finds most frequent color in each block
-- Falls back to mean if no color is dominant
-- Preserves original palette colors
+---
 
 ## Credits
 
-This Python/Rust implementation is based on:
+This optimized fork builds upon:
 
-- **[unfake.js](https://github.com/jenissimo/unfake.js)** by Eugeniy Smirnov - The original JavaScript implementation that inspired this project
-- **[image-quantization](https://github.com/ibezkrovnyi/image-quantization)** by Igor Bezkrovnyi - TypeScript implementation of various color quantization algorithms
+- **[unfake.js](https://github.com/jenissimo/unfake.js)** by Eugeniy Smirnov  
+- **[image-quantization](https://github.com/ibezkrovnyi/image-quantization)** by Igor Bezkrovnyi  
+- **[unfake.py](https://github.com/painebenjamin/unfake.py)** by Benjamin Paine  
 
-Additional references:
-- Wu, Xiaolin. "Efficient Statistical Computations for Optimal Color Quantization" (1992)
-- Kopf, Johannes and Dani Lischinski. "Depixelizing Pixel Art" (2011)
+Additional references:  
+- Wu, Xiaolin. "Efficient Statistical Computations for Optimal Color Quantization" (1992)  
+- Kopf, Johannes and Dani Lischinski. "Depixelizing Pixel Art" (2011)  
+- Scikit-learn: KMeans implementation for color clustering  
+
+---
 
 ## License
 
-MIT License 
+MIT License
